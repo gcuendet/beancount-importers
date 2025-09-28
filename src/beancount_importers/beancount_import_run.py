@@ -11,10 +11,19 @@ from uabean.importers import binance, ibkr, kraken, monobank
 import beancount_importers.import_monzo as import_monzo
 import beancount_importers.import_revolut as import_revolut
 import beancount_importers.import_wise as import_wise
+import importlib
 
 
-def get_importer_config(type, account, currency, importer_params):
+def load_entrypoint(group: str, name: str):
+    entry_points = importlib.metadata.entry_points()
+    (plugin,) = entry_points.select(group=group, name=name)
+
+    return plugin.load() if plugin else None
+
+
+def get_importer_config(type, account, currency, emoji, importer_params):
     common = dict(type=type, account=account, currency=currency)
+
     if type == "monzo":
         return dict(
             **common,
@@ -24,7 +33,7 @@ def get_importer_config(type, account, currency, importer_params):
                 "In the app go to Help > Download a statement. "
                 "The easiest way would be just to download monthly statements every month."
             ),
-            emoji="💷"
+            emoji="💷",
         )
     elif type == "wise":
         return dict(
@@ -32,14 +41,14 @@ def get_importer_config(type, account, currency, importer_params):
             module="beancount_import.source.generic_importer_source_beangulp",
             importer=import_wise.get_importer(account, currency),
             description="Can be downloaded online from https://wise.com/balances/statements",
-            emoji="💵"
+            emoji="💵",
         )
     elif type == "revolut":
         return dict(
             **common,
             module="beancount_import.source.generic_importer_source_beangulp",
             importer=import_revolut.get_importer(account, currency),
-            emoji="💵"
+            emoji="💵",
         )
     elif type == "ibkr":
         return dict(
@@ -55,7 +64,7 @@ def get_importer_config(type, account, currency, importer_params):
                 'From "Trades" disable "Sub Category", "FIGI", "Issuer Country Code", "Related Trade ID", '
                 '"Orig *", "Related Transaction ID", "RTN", "Initial Investment". Otherwise importer may break.'
             ),
-            emoji="📈"
+            emoji="📈",
         )
     elif type == "monobank":
         mapped_account_config = {}
@@ -70,24 +79,38 @@ def get_importer_config(type, account, currency, importer_params):
             **common,
             module="beancount_import.source.generic_importer_source_beangulp",
             importer=monobank.Importer(**mapped_params),
-            emoji="💵"
+            emoji="💵",
         )
     elif type == "kraken":
         return dict(
             **common,
             module="beancount_import.source.generic_importer_source_beangulp",
             importer=kraken.Importer(**(importer_params or {})),
-            emoji="🎰"
+            emoji="🎰",
         )
     elif type == "binance":
         return dict(
             **common,
             module="beancount_import.source.generic_importer_source_beangulp",
             importer=binance.Importer(**(importer_params or {})),
-            emoji="🎰"
+            emoji="🎰",
         )
     else:
-        return None
+        # Assume type is an entryoint
+        group, name = type.split(":")
+        entrypoint = load_entrypoint(group, name)
+        importer_instance = entrypoint(
+            account=account,
+            currency=currency,
+            **(importer_params or {}),
+        )
+
+        return dict(
+            **common,
+            module="beancount_import.source.generic_importer_source_beangulp",
+            importer=importer_instance,
+            emoji=emoji if emoji else "🎰",
+        )
 
 
 def load_import_config_from_file(filename, data_dir, output_dir):
@@ -101,8 +124,9 @@ def load_import_config_from_file(filename, data_dir, output_dir):
                     params["importer"],
                     params.get("account"),
                     params.get("currency"),
+                    params.get("emoji"),
                     params.get("params"),
-                )
+                ),
             )
             data_sources.append(config)
         return dict(
